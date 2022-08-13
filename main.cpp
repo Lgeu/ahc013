@@ -32,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include <atcoder/all>
+
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif
@@ -222,61 +224,87 @@ inline double Time() {
            1e-9;
 }
 
-namespace dence {
+// ======================================================================
 
-// 蜜なパターン
-// ビームサーチ
-template <int N> void Solve() {
-    //
-}
-} // namespace dence
+auto rng = mt19937(42);
 
 namespace input {
 int N, K;
 }
 
 using Point = Vec2<signed char>;
-struct Move {
+struct alignas(4) Move {
     Point from, to;
     inline void Print() const {
         cout << (int)from.y << ' ' << (int)from.x << ' ' << (int)to.y << ' '
              << (int)to.x << endl;
     }
+    inline bool Empty() const {
+        return from.y == 0 && from.x == 0 && to.y == 0 && to.x == 0;
+    }
+    inline void Reset() {
+        from.y = 0;
+        from.x = 0;
+        to.y = 0;
+        to.x = 0;
+    }
 };
 
-namespace sparse {
+struct Cell {
+    signed char color;
+    signed char index;
+};
 
-// 疎なパターン
-// 最初に横を開通させる
-
-template <int N> struct State {
-    Board<signed char, N, N> board;
+template <int N> struct Input {
+    Board<Cell, N, N> board;
+    array<array<Point, 100>, 6> where;
     void Read() {
+        auto number_counts = array<int, 6>();
         for (auto y = 0; y < N; y++) {
             string s;
             cin >> s;
             for (auto x = 0; x < N; x++) {
-                board[{y, x}] = s[x] - '0';
+                int c = s[x] - '0';
+                board[{y, x}] = {(signed char)c, (signed char)number_counts[c]};
+                if (c)
+                    where[c][number_counts[c]++] = {y, x};
             }
         }
+        assert(number_counts[1] == 100);
+        assert(number_counts[2] == 100);
     }
+};
 
-    array<Move, 500> moves;
+template <int N_, int K_> struct State {
+    static constexpr auto N = 20; // N_
+    static constexpr auto K = 4;  // K_
+    Board<Cell, N, N> board;      // 最終状態
+    array<Point, 100> where1;
+    array<Point, 100> where2;
+    double score;
+
+    atcoder::dsu uf1, uf2;
+
+    array<Move, K * 100> moves;
     int n_moves = 0;
 
-    array<Move, 500> connections;
+    array<Move, K * 100> connections;
     int n_connections = 0;
 
-    void Apply(Move pp) {
-        assert(board[pp.from] != 0);
-        assert(board[pp.to] == 0);
-        board[pp.to] = board[pp.from];
-        board[pp.from] = 0;
-        moves[n_moves++] = pp;
-    }
+    State()
+        : board(), where1(), where2(), score(), uf1(100), uf2(100), moves(),
+          n_moves(), connections(), n_connections() {}
+
+    // void Apply(Move pp) {
+    //     assert(board[pp.from] != 0);
+    //     assert(board[pp.to] == 0);
+    //     board[pp.to] = board[pp.from];
+    //     board[pp.from] = 0;
+    //     moves[n_moves++] = pp;
+    // }
 
     inline int RemainingMoves() const {
-        return input::K * 100 - n_moves - n_connections;
+        return K * 100 - n_moves - n_connections;
     }
 
     inline void Print() const {
@@ -287,145 +315,248 @@ template <int N> struct State {
         for (int i = 0; i < n_connections; i++)
             connections[i].Print();
     }
-};
 
-template <int N> void Solve() {
-    auto state = State<N>();
-    state.Read();
+    inline bool Movable(Move pp) const {
+        return board[pp.from].color != 0 && board[pp.to].color == 0;
+    }
 
-    auto& board = state.board;
+    inline void ApplyMove(Move pp) {
+        assert(board[pp.from].color != 0);
+        assert(board[pp.to].color == 0);
+        board[pp.to] = board[pp.from];
+        board[pp.from] = {};
+        if (board[pp.to].color == 1)
+            where1[board[pp.to].index] = pp.to;
+        else if (board[pp.to].color == 2)
+            where2[board[pp.to].index] = pp.to;
+    }
 
-    // 上を揃える
-    {
-        const auto cy = 1;
-        for (auto x = 0; x < N; x++) {
-            const auto c = Point(cy, x);
-            const auto u = Point(cy - 1, x);
-            const auto d = Point(cy + 1, x);
-            const auto dd = Point(cy + 2, x);
-            const auto ul = Point(cy - 1, max(0, x - 1));
-            const auto dl = Point(cy + 1, max(0, x - 1));
-            const auto ur = Point(cy - 1, min(N - 1, x + 1));
-            const auto dr = Point(cy + 1, min(N - 1, x + 1));
-            const auto ddd = Point(cy + 3, x);
-            const auto ddl = Point(cy + 2, max(0, x - 1));
-            const auto ull = Point(cy - 1, max(0, x - 2));
-            const auto dll = Point(cy + 1, max(0, x - 2));
-            const auto ddr = Point(cy + 2, min(N - 1, x + 1));
-            const auto urr = Point(cy - 1, min(N - 1, x + 2));
-            const auto drr = Point(cy + 1, min(N - 1, x + 2));
-            const auto dddd = Point(cy + 4, x);
-            const auto dddl = Point(cy + 3, max(0, x - 1));
-            const auto ddll = Point(cy + 2, max(0, x - 2));
-            const auto ulll = Point(cy - 1, max(0, x - 3));
-            const auto dlll = Point(cy + 1, max(0, x - 3));
+    inline bool Connect(Move pp) {
+        // 右か下を仮定
+        if (board[pp.from].color != board[pp.to].color)
+            return false;
+        if (board[pp.from].color != 1 && board[pp.from].color != 2)
+            return false;
+        const auto index_from = board[pp.from].index;
+        const auto index_to = board[pp.to].index;
+        if (board[pp.from].color == 1) {
+            if (uf1.same(index_from, index_to))
+                return false;
+        } else {
+            if (uf2.same(index_from, index_to))
+                return false;
+        }
+        if (pp.from.y == pp.to.y) {
+            for (auto x = pp.from.x + 1; x < pp.to.x; x++)
+                if (board[{(int)pp.from.y, x}].color != 0)
+                    return false;
+        } else {
+            assert(pp.from.x == pp.to.x);
+            for (auto y = pp.from.y + 1; y < pp.to.y; y++)
+                if (board[{y, (int)pp.from.x}].color != 0)
+                    return false;
+        }
 
-            switch (board[c]) {
-            case 0:
-                if (board[d] == 1)
-                    state.Apply({d, c});
-                else if (board[u] == 1)
-                    state.Apply({u, c});
-                break;
-            case 1:
-                break; // do nothing
-            default:
-                if (board[u] == 0)
-                    state.Apply({c, u});
-                else if (board[d] == 0)
-                    state.Apply({c, d});
-                else if (board[dd] == 0) {
-                    state.Apply({d, dd});
-                    state.Apply({c, d});
-                } else if (board[ul] == 0) {
-                    state.Apply({u, ul});
-                    state.Apply({c, u});
-                } else if (board[dl] == 0) {
-                    state.Apply({d, dl});
-                    state.Apply({c, d});
-                } else if (board[ur] == 0) {
-                    state.Apply({u, ur});
-                    state.Apply({c, u});
-                } else if (board[dr] == 0) {
-                    state.Apply({d, dr});
-                    state.Apply({c, d});
-                } else if (board[ddd] == 0) {
-                    state.Apply({dd, ddd});
-                    state.Apply({d, dd});
-                    state.Apply({c, d});
-                } else if (board[ddl] == 0) {
-                    state.Apply({dd, ddl});
-                    state.Apply({d, dd});
-                    state.Apply({c, d});
-                } else if (board[ull] == 0) {
-                    state.Apply({ul, ull});
-                    state.Apply({u, ul});
-                    state.Apply({c, u});
-                } else if (board[dll] == 0) {
-                    state.Apply({dl, dll});
-                    state.Apply({d, dl});
-                    state.Apply({c, d});
-                } else if (board[ddr] == 0) {
-                    state.Apply({dd, ddr});
-                    state.Apply({d, dd});
-                    state.Apply({c, d});
-                } else if (board[urr] == 0) {
-                    state.Apply({ur, urr});
-                    state.Apply({u, ur});
-                    state.Apply({c, u});
-                } else if (board[drr] == 0) {
-                    state.Apply({dr, drr});
-                    state.Apply({d, dr});
-                    state.Apply({c, d});
-                } else if (board[dddd] == 0) {
-                    state.Apply({ddd, dddd});
-                    state.Apply({dd, ddd});
-                    state.Apply({d, dd});
-                    state.Apply({c, d});
-                } else if (board[dddl] == 0) {
-                    state.Apply({ddd, dddl});
-                    state.Apply({dd, ddd});
-                    state.Apply({d, dd});
-                    state.Apply({c, d});
-                } else if (board[ddll] == 0) {
-                    state.Apply({ddl, ddll});
-                    state.Apply({dd, ddl});
-                    state.Apply({d, dd});
-                    state.Apply({c, d});
-                } else if (board[ulll] == 0) {
-                    state.Apply({ull, ulll});
-                    state.Apply({ul, ull});
-                    state.Apply({u, ul});
-                    state.Apply({c, u});
-                } else if (board[dlll] == 0) {
-                    state.Apply({dll, dlll});
-                    state.Apply({dl, dll});
-                    state.Apply({d, dl});
-                    state.Apply({c, d});
-                } else {
-                    assert(false);
+        // ここまで来れば接続可能
+        if (pp.from.y == pp.to.y) {
+            for (auto x = pp.from.x + 1; x < pp.to.x; x++)
+                board[{(int)pp.from.y, x}].color = 9;
+        } else {
+            assert(pp.from.x == pp.to.x);
+            for (auto y = pp.from.y + 1; y < pp.to.y; y++)
+                board[{y, (int)pp.from.x}].color = 9;
+        }
+
+        if (board[pp.from].color == 1) {
+            score += uf1.size(index_from) * uf1.size(index_to);
+            uf1.merge(index_from, index_to);
+        } else {
+            score += uf2.size(index_from) * uf2.size(index_to);
+            uf2.merge(index_from, index_to);
+        }
+
+        return true;
+    }
+
+    void RandomUpdate(const Input<N>& initial_board) {
+        // inplace で処理する
+        // ランダムで 1 手消去する
+        // 空いていたら、1/2 で手を追加
+        board = initial_board.board;
+        where1 = initial_board.where[1];
+        where2 = initial_board.where[2];
+        uf1 = atcoder::dsu(100);
+        uf2 = atcoder::dsu(100);
+        score = 0.0;
+        const auto step_erase = n_moves + n_connections == 0
+                                    ? -1
+                                    : uniform_int_distribution<>(
+                                          0, n_moves + n_connections - 1)(rng);
+        auto nth_move = 0;
+        auto empty_indices = array<short, K * 100>(); // 後ろはconnection
+        auto n_empty_indices = 0;
+        auto n_seen_connections = 0;
+
+        for (auto i = 0; i < K * 100; i++) {
+            if (!moves[i].Empty()) {
+                if (nth_move == step_erase) {
+                    moves[i].Reset();
+                    n_moves--;
+                }
+                nth_move++;
+            } else if (!connections[i].Empty()) {
+                if (nth_move == step_erase) {
+                    connections[i].Reset();
+                    n_connections--;
+                }
+                nth_move++;
+            }
+
+            // 移動不可なら取り除く
+            if (!moves[i].Empty() && !Movable(moves[i])) {
+                moves[i].Reset();
+                n_moves--;
+            }
+
+            // メモ
+            if (!connections[i].Empty()) {
+                empty_indices[500 - --n_seen_connections] = i;
+            }
+
+            if (moves[i].Empty() && connections[i].Empty()) {
+                // 1/2 でスキップ
+                const auto r = uniform_real_distribution<>()(rng);
+                if (r < 0.5) {
+                    empty_indices[n_empty_indices++] = i;
+                    continue;
                 }
 
-                if (board[d] == 1)
-                    state.Apply({d, c});
-                else if (board[u] == 1)
-                    state.Apply({u, c});
+                // 移動を追加
+                do {
+                    const auto rc = uniform_real_distribution<>(0, 1)(rng);
+                    if (rc == 0) {
+                        // 横
+                        const auto y =
+                            uniform_int_distribution<>(0, N - 1)(rng);
+                        const auto x =
+                            uniform_int_distribution<>(0, N - 2)(rng);
+                        const auto l = Point(y, x);
+                        const auto r = Point(y, x + 1);
+                        if ((board[l].color == 0) == (board[r].color == 0))
+                            continue;
+                        if (board[l].color == 0) {
+                            // ←
+                            moves[i] = {r, l};
+                        } else {
+                            // →
+                            moves[i] = {l, r};
+                        }
+                    } else {
+                        // 縦
+                        const auto x =
+                            uniform_int_distribution<>(0, N - 1)(rng);
+                        const auto y =
+                            uniform_int_distribution<>(0, N - 2)(rng);
+                        const auto u = Point(y, x);
+                        const auto d = Point(y + 1, x);
+                        if ((board[u].color == 0) == (board[d].color == 0))
+                            continue;
+                        if (board[u].color == 0) {
+                            // ↑
+                            moves[i] = {d, u};
+                        } else {
+                            // ↓
+                            moves[i] = {u, d};
+                        }
+                    }
+                } while (false);
+                n_moves++;
+            }
 
-                // TODO
+            // 盤面を更新
+            ApplyMove(moves[i]);
+        }
+
+        assert(n_seen_connections == n_connections);
+
+        // connection
+        for (auto idx_empty_indices = K * 100 - n_connections;
+             idx_empty_indices < K * 100; idx_empty_indices++) {
+            auto i = empty_indices[idx_empty_indices];
+            assert(!connections[i].Empty());
+            if (!Connect(connections[i])) {
+                connections[i].Reset();
+                n_connections--;
+                empty_indices[n_empty_indices++] = i;
+            }
+        }
+
+        // 貪欲で繋ぐ
+        auto idx_empty_indices = 0;
+        for (auto target = 1; target <= 2; target++) {
+            auto order = array<signed char, 100>();
+            iota(order.begin(), order.end(), 0);
+            shuffle(order.begin(), order.end(), rng);
+            auto idx_order = 0;
+            auto& uf = target == 1 ? uf1 : uf2;
+
+            for (; idx_empty_indices < n_empty_indices; idx_empty_indices++) {
+                const auto i = empty_indices[idx_empty_indices];
+                assert(moves[i].Empty() && connections[i].Empty());
+                while (idx_order < 100) {
+                    const auto from = where1[order[idx_order++]];
+                    // 横
+                    for (auto to = Point(from.y, (signed char)(from.x + 1));
+                         to.x < N; to.x++) {
+                        if (board[to].color == target &&
+                            !uf.same(board[to].index, board[from].index)) {
+                            connections[i] = {from, to};
+                            const auto con = Connect(connections[i]);
+                            assert(con);
+                            n_connections++;
+                            goto connected;
+                        } else if (board[to].color != 0) {
+                            break;
+                        }
+                    }
+                    // 縦
+                    for (auto to = Point((signed char)(from.y + 1), from.x);
+                         to.y < N; to.y++) {
+                        if (board[to].color == target &&
+                            !uf.same(board[to].index, board[from].index)) {
+                            connections[i] = {from, to};
+                            const auto con = Connect(connections[i]);
+                            assert(con);
+                            n_connections++;
+                            goto connected;
+                        } else if (board[to].color != 0) {
+                            break;
+                        }
+                    }
+                    // 次の from 候補へ
+                }
+                // from 候補がなくなった
                 break;
+
+            connected:;
             }
         }
     }
-    state.Print();
+};
+
+template <int N, int K> void SolveN() {
+    auto input = Input<N>();
+    input.Read();
+    auto state = State<N, K>();
+    auto& board = state.board;
 }
-} // namespace sparse
 
 void Solve() {
     cin >> input::N >> input::K;
     switch (input::N) {
         // clang-format off
 
-        #define CASE(n) case n: sparse::Solve<n>(); break;
+        #define CASE(n) case n: switch(input::K) { case 2: SolveN<n, 2>(); break; case 3: SolveN<n, 3>(); break; case 4: SolveN<n, 4>(); break; case 5: SolveN<n, 5>(); break; } break;
                                                      CASE(15) CASE(16) CASE(17) CASE(18) CASE(19)
         CASE(20) CASE(21) CASE(22) CASE(23) CASE(24) CASE(25) CASE(26) CASE(27) CASE(28) CASE(29)
         CASE(30) CASE(31) CASE(32) CASE(33) CASE(34) CASE(35) CASE(36) CASE(37) CASE(38) CASE(39)
