@@ -276,9 +276,9 @@ template <int N> struct Input {
 };
 
 template <int N_, int K_> struct State {
-    static constexpr auto N = 20; // N_
-    static constexpr auto K = 4;  // K_
-    Board<Cell, N, N> board;      // 最終状態
+    static constexpr auto N = N_;
+    static constexpr auto K = K_;
+    Board<Cell, N, N> board; // 最終状態
     array<Point, 100> where1;
     array<Point, 100> where2;
     double score;
@@ -286,22 +286,14 @@ template <int N_, int K_> struct State {
     atcoder::dsu uf1, uf2;
 
     array<Move, K * 100> moves;
-    int n_moves = 0;
+    int n_moves;
 
     array<Move, K * 100> connections;
-    int n_connections = 0;
+    int n_connections;
 
     State()
         : board(), where1(), where2(), score(), uf1(100), uf2(100), moves(),
           n_moves(), connections(), n_connections() {}
-
-    // void Apply(Move pp) {
-    //     assert(board[pp.from] != 0);
-    //     assert(board[pp.to] == 0);
-    //     board[pp.to] = board[pp.from];
-    //     board[pp.from] = 0;
-    //     moves[n_moves++] = pp;
-    // }
 
     inline int RemainingMoves() const {
         return K * 100 - n_moves - n_connections;
@@ -309,11 +301,13 @@ template <int N_, int K_> struct State {
 
     inline void Print() const {
         cout << n_moves << endl;
-        for (int i = 0; i < n_moves; i++)
-            moves[i].Print();
+        for (int i = 0; i < K * 100; i++)
+            if (!moves[i].Empty())
+                moves[i].Print();
         cout << n_connections << endl;
-        for (int i = 0; i < n_connections; i++)
-            connections[i].Print();
+        for (int i = 0; i < K * 100; i++)
+            if (!connections[i].Empty())
+                connections[i].Print();
     }
 
     inline bool Movable(Move pp) const {
@@ -388,6 +382,8 @@ template <int N_, int K_> struct State {
         uf1 = atcoder::dsu(100);
         uf2 = atcoder::dsu(100);
         score = 0.0;
+
+        assert(n_moves + n_connections <= K * 100);
         const auto step_erase = n_moves + n_connections == 0
                                     ? -1
                                     : uniform_int_distribution<>(
@@ -420,7 +416,7 @@ template <int N_, int K_> struct State {
 
             // メモ
             if (!connections[i].Empty()) {
-                empty_indices[500 - --n_seen_connections] = i;
+                empty_indices[100 * K - ++n_seen_connections] = i;
             }
 
             if (moves[i].Empty() && connections[i].Empty()) {
@@ -433,7 +429,7 @@ template <int N_, int K_> struct State {
 
                 // 移動を追加
                 do {
-                    const auto rc = uniform_real_distribution<>(0, 1)(rng);
+                    const auto rc = uniform_int_distribution<>(0, 1)(rng);
                     if (rc == 0) {
                         // 横
                         const auto y =
@@ -469,21 +465,25 @@ template <int N_, int K_> struct State {
                             moves[i] = {u, d};
                         }
                     }
-                } while (false);
+                    break;
+                } while (true);
                 n_moves++;
             }
 
             // 盤面を更新
-            ApplyMove(moves[i]);
+            if (!moves[i].Empty())
+                ApplyMove(moves[i]);
         }
 
         assert(n_seen_connections == n_connections);
+        assert(n_moves + n_connections <= K * 100);
 
         // connection
         for (auto idx_empty_indices = K * 100 - n_connections;
              idx_empty_indices < K * 100; idx_empty_indices++) {
-            auto i = empty_indices[idx_empty_indices];
+            const auto i = empty_indices[idx_empty_indices];
             assert(!connections[i].Empty());
+            assert(moves[i].Empty());
             if (!Connect(connections[i])) {
                 connections[i].Reset();
                 n_connections--;
@@ -499,12 +499,13 @@ template <int N_, int K_> struct State {
             shuffle(order.begin(), order.end(), rng);
             auto idx_order = 0;
             auto& uf = target == 1 ? uf1 : uf2;
+            const auto& where = target == 1 ? where1 : where2;
 
             for (; idx_empty_indices < n_empty_indices; idx_empty_indices++) {
                 const auto i = empty_indices[idx_empty_indices];
                 assert(moves[i].Empty() && connections[i].Empty());
                 while (idx_order < 100) {
-                    const auto from = where1[order[idx_order++]];
+                    const auto from = where[order[idx_order++]];
                     // 横
                     for (auto to = Point(from.y, (signed char)(from.x + 1));
                          to.x < N; to.x++) {
@@ -542,13 +543,36 @@ template <int N_, int K_> struct State {
             }
         }
     }
+
+    void SanityCheck() const {
+        auto n_moves_count = 0;
+        for (auto pp : moves) {
+            if (!pp.Empty())
+                n_moves_count++;
+        }
+        assert(n_moves == n_moves_count);
+    }
 };
 
 template <int N, int K> void SolveN() {
     auto input = Input<N>();
     input.Read();
     auto state = State<N, K>();
-    auto& board = state.board;
+
+    auto t0 = Time();
+    auto iteration = 0;
+
+    while (Time() - t0 < 2.9) {
+        auto updated_state = state;
+        updated_state.RandomUpdate(input);
+        if (updated_state.score > state.score) {
+            state = updated_state;
+        }
+        iteration++;
+    }
+
+    state.Print();
+    cerr << iteration << " iterations" << endl;
 }
 
 void Solve() {
