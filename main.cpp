@@ -250,9 +250,13 @@ struct alignas(4) Move {
     }
 };
 
-struct Cell {
+struct alignas(4) Cell {
     signed char color;
-    signed char index;
+    unsigned char index;
+    short last_move_turn;
+    inline Cell() : color(), index(), last_move_turn(-1) {}
+    inline Cell(signed char c, unsigned char i, short l)
+        : color(c), index(i), last_move_turn(l) {}
 };
 
 template <int N> struct Input {
@@ -265,7 +269,8 @@ template <int N> struct Input {
             cin >> s;
             for (auto x = 0; x < N; x++) {
                 int c = s[x] - '0';
-                board[{y, x}] = {(signed char)c, (signed char)number_counts[c]};
+                board[{y, x}] = Cell{
+                    (signed char)c, (unsigned char)number_counts[c], (short)-1};
                 if (c)
                     where[c][number_counts[c]++] = {y, x};
             }
@@ -282,7 +287,7 @@ struct UnionFind {
     inline signed char find(const signed char k) {
         return data[k] < 0 ? k : data[k] = find(data[k]);
     }
-    inline int unite(signed char x, signed char y) {
+    inline bool unite(signed char x, signed char y) {
         if ((x = find(x)) == (y = find(y)))
             return false;
         if (data[x] > data[y])
@@ -291,11 +296,130 @@ struct UnionFind {
         data[y] = x;
         return true;
     }
-    inline int size(signed char k) { return -data[find(k)]; }
-    inline int same(signed char x, signed char y) { return find(x) == find(y); }
+    inline signed char size(signed char k) { return -data[find(k)]; }
+    inline bool same(signed char x, signed char y) {
+        return find(x) == find(y);
+    }
 };
 
 template <int N_, int K_> struct State {
+    static constexpr auto N = N_;
+    static constexpr auto K = K_;
+    Board<Cell, N, N> board; // 最終状態
+    array<array<Point, 100>, 2> where12;
+    double score;
+
+    array<UnionFind, 2> ufs;
+
+    array<Move, K * 100> moves;
+    int n_moves;
+
+    array<Move, 200> connections;
+    int n_connections;
+
+    inline void Print() const {
+        cout << n_moves << endl;
+        for (int i = 0; i < K * 100; i++)
+            if (!moves[i].Empty())
+                moves[i].Print();
+        cout << n_connections << endl;
+        for (int i = 0; i < 200; i++)
+            if (!connections[i].Empty())
+                connections[i].Print();
+    }
+
+    inline bool Movable(Move pp) const {
+        return board[pp.from].color != 0 && board[pp.to].color == 0;
+    }
+
+    void RandomUpdate(const Input<N>& initial_board) {
+
+        auto old_board = board;
+        auto old_uf = uf;
+        board = initial_board.board;
+        where12[0] = initial_board.where[1];
+        where12[1] = initial_board.where[2];
+        score = 0.0;
+
+        // UF はそのまま
+
+        assert(n_moves + n_connections <= K * 100);
+
+        // 削除する箇所を決める
+        auto im_erase = -1;
+        auto ic_erase = -1;
+        for (auto trial = 0; trial < 20; trial++) {
+            const auto i =
+                uniform_int_distribution<>(0, K * 100 + 200 - 1)(rng);
+            if (i < K * 100) {
+                if (!moves[i].Empty()) {
+                    im_erase = i;
+                    break;
+                }
+            } else {
+                if (!connections[i - K * 100].Empty()) {
+                    ic_erase = i - K * 100;
+                    break;
+                }
+            }
+        }
+
+        // 移動の減少無し、かつ移動の増加もあり得ない場合、処理を飛ばす
+        if (im_erase == -1 && n_moves + n_connections == K * 100) {
+            ufs = ;
+            goto moved;
+        }
+
+        auto current_empty_ic = 0;
+        const auto get_next_empty_ic = [&]() {
+            for (;; current_empty_ic++) {
+                if (connections[current_empty_ic].Empty())
+                    return current_empty_ic;
+            }
+        };
+
+        const auto check_affect_connection = [&](const Point p, const Point q) {
+            if ()
+        };
+
+        // move を更新するループを回す
+        auto always_movable = true;
+        auto connection_removed = array<bool, 2>();
+        for (auto im = 0; im < K * 100; im++) {
+            // 移動を取り除く
+            if (im == im_erase) {
+                assert(!moves[im].Empty());
+                assert(im <= old_board[moves[im].from].last_move_turn);
+                assert(im <= old_board[moves[im].to].last_move_turn);
+                if (always_movable) {
+                    if (im != old_board[moves[im].from].last_move_turn ||
+                        im != old_board[moves[im].to].last_move_turn) {
+                        // 後の移動に影響を与える
+                        always_movable = false;
+                        connection_removed[0] = true;
+                        connection_removed[1] = true;
+                    } else {
+                        // 後の移動に影響を与えないが、接続に影響する
+                        if ()
+                    }
+                }
+
+                moves[im].Reset();
+            }
+            if (always_movable) {
+                //
+            } else {
+                // 移動不可なら取り除く
+                if (!moves[im] &&)
+            }
+        }
+
+    moved:
+        // TODO
+    }
+};
+
+template <int N_, int K_> struct StateOld {
     static constexpr auto N = N_;
     static constexpr auto K = K_;
     Board<Cell, N, N> board; // 最終状態
@@ -311,7 +435,7 @@ template <int N_, int K_> struct State {
     array<Move, K * 100> connections;
     int n_connections;
 
-    State()
+    StateOld()
         : board(), where1(), where2(), score(), uf1(), uf2(), moves(),
           n_moves(), connections(), n_connections() {}
 
