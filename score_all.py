@@ -38,4 +38,8 @@ with ThreadPoolExecutor(4) as executor:
         futures.append(executor.submit(run, cmd, i))
     as_completed(futures)
 
-print(f"Mean Score = {sum(scores) / len(scores)}")
+mean_score = sum(scores) / len(scores)
+
+print(f"Mean Score = {mean_score}")
+
+run(f"mv {out_dir} {out_dir}_{mean_score:.2f}", "mv")

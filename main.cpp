@@ -32,7 +32,7 @@
 #include <utility>
 #include <vector>
 
-#include <atcoder/all>
+//#include <atcoder/all>
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -275,6 +275,26 @@ template <int N> struct Input {
     }
 };
 
+// from https://atcoder.jp/contests/practice2/submissions/16581325
+struct UnionFind {
+    array<signed char, 100> data;
+    inline UnionFind() { fill(data.begin(), data.end(), (signed char)-1); }
+    inline signed char find(const signed char k) {
+        return data[k] < 0 ? k : data[k] = find(data[k]);
+    }
+    inline int unite(signed char x, signed char y) {
+        if ((x = find(x)) == (y = find(y)))
+            return false;
+        if (data[x] > data[y])
+            swap(x, y);
+        data[x] += data[y];
+        data[y] = x;
+        return true;
+    }
+    inline int size(signed char k) { return -data[find(k)]; }
+    inline int same(signed char x, signed char y) { return find(x) == find(y); }
+};
+
 template <int N_, int K_> struct State {
     static constexpr auto N = N_;
     static constexpr auto K = K_;
@@ -283,7 +303,7 @@ template <int N_, int K_> struct State {
     array<Point, 100> where2;
     double score;
 
-    atcoder::dsu uf1, uf2;
+    UnionFind uf1, uf2;
 
     array<Move, K * 100> moves;
     int n_moves;
@@ -292,7 +312,7 @@ template <int N_, int K_> struct State {
     int n_connections;
 
     State()
-        : board(), where1(), where2(), score(), uf1(100), uf2(100), moves(),
+        : board(), where1(), where2(), score(), uf1(), uf2(), moves(),
           n_moves(), connections(), n_connections() {}
 
     inline int RemainingMoves() const {
@@ -325,30 +345,32 @@ template <int N_, int K_> struct State {
             where2[board[pp.to].index] = pp.to;
     }
 
-    inline bool Connect(Move pp) {
-        // 右か下を仮定
-        if (board[pp.from].color != board[pp.to].color)
-            return false;
-        if (board[pp.from].color != 1 && board[pp.from].color != 2)
-            return false;
+    inline bool Connect(Move pp, bool no_check = false) {
         const auto index_from = board[pp.from].index;
         const auto index_to = board[pp.to].index;
-        if (board[pp.from].color == 1) {
-            if (uf1.same(index_from, index_to))
+        if (!no_check) {
+            // 右か下を仮定
+            if (board[pp.from].color != board[pp.to].color)
                 return false;
-        } else {
-            if (uf2.same(index_from, index_to))
+            if (board[pp.from].color != 1 && board[pp.from].color != 2)
                 return false;
-        }
-        if (pp.from.y == pp.to.y) {
-            for (auto x = pp.from.x + 1; x < pp.to.x; x++)
-                if (board[{(int)pp.from.y, x}].color != 0)
+            if (board[pp.from].color == 1) {
+                if (uf1.same(index_from, index_to))
                     return false;
-        } else {
-            assert(pp.from.x == pp.to.x);
-            for (auto y = pp.from.y + 1; y < pp.to.y; y++)
-                if (board[{y, (int)pp.from.x}].color != 0)
+            } else {
+                if (uf2.same(index_from, index_to))
                     return false;
+            }
+            if (pp.from.y == pp.to.y) {
+                for (auto x = pp.from.x + 1; x < pp.to.x; x++)
+                    if (board[{(int)pp.from.y, x}].color != 0)
+                        return false;
+            } else {
+                assert(pp.from.x == pp.to.x);
+                for (auto y = pp.from.y + 1; y < pp.to.y; y++)
+                    if (board[{y, (int)pp.from.x}].color != 0)
+                        return false;
+            }
         }
 
         // ここまで来れば接続可能
@@ -363,10 +385,10 @@ template <int N_, int K_> struct State {
 
         if (board[pp.from].color == 1) {
             score += uf1.size(index_from) * uf1.size(index_to);
-            uf1.merge(index_from, index_to);
+            uf1.unite(index_from, index_to);
         } else {
             score += uf2.size(index_from) * uf2.size(index_to);
-            uf2.merge(index_from, index_to);
+            uf2.unite(index_from, index_to);
         }
 
         return true;
@@ -376,11 +398,23 @@ template <int N_, int K_> struct State {
         // inplace で処理する
         // ランダムで 1 手消去する
         // 空いていたら、1/2 で手を追加
+
+        static constexpr auto kCheckPerf = true;
+        static auto t_move = 0.0;
+        static auto t_conn_1 = 0.0;
+        static auto t_conn_2 = 0.0;
+        static auto t0 = 0.0;
+        static auto iteration = 0;
+        if constexpr (kCheckPerf) {
+            t0 = Time();
+            iteration++;
+        }
+
         board = initial_board.board;
         where1 = initial_board.where[1];
         where2 = initial_board.where[2];
-        uf1 = atcoder::dsu(100);
-        uf2 = atcoder::dsu(100);
+        uf1 = UnionFind();
+        uf2 = UnionFind();
         score = 0.0;
 
         assert(n_moves + n_connections <= K * 100);
@@ -422,7 +456,7 @@ template <int N_, int K_> struct State {
             if (moves[i].Empty() && connections[i].Empty()) {
                 // 1/2 でスキップ
                 const auto r = uniform_real_distribution<>()(rng);
-                if (r < 0.5) {
+                if (r < 0.5) { // パラメータ
                     empty_indices[n_empty_indices++] = i;
                     continue;
                 }
@@ -475,10 +509,18 @@ template <int N_, int K_> struct State {
                 ApplyMove(moves[i]);
         }
 
+        if constexpr (kCheckPerf) {
+            const auto t1 = Time();
+            t_move += t1 - t0;
+            t0 = t1;
+        }
+
         assert(n_seen_connections == n_connections);
         assert(n_moves + n_connections <= K * 100);
 
         // connection
+        // メモ:
+        // ↑でconnectionが消されてmoveが追加されない場合、かならずConnectは成功する
         for (auto idx_empty_indices = K * 100 - n_connections;
              idx_empty_indices < K * 100; idx_empty_indices++) {
             const auto i = empty_indices[idx_empty_indices];
@@ -491,7 +533,14 @@ template <int N_, int K_> struct State {
             }
         }
 
+        if constexpr (kCheckPerf) {
+            const auto t1 = Time();
+            t_conn_1 += t1 - t0;
+            t0 = t1;
+        }
+
         // 貪欲で繋ぐ
+        // メモ: 後から繋ぐので、繋ぐことで他の繋ぎが不可能になることはない
         auto idx_empty_indices = 0;
         for (auto target = 1; target <= 2; target++) {
             auto order = array<signed char, 100>();
@@ -512,7 +561,7 @@ template <int N_, int K_> struct State {
                         if (board[to].color == target &&
                             !uf.same(board[to].index, board[from].index)) {
                             connections[i] = {from, to};
-                            const auto con = Connect(connections[i]);
+                            const auto con = Connect(connections[i], true);
                             assert(con);
                             n_connections++;
                             goto connected;
@@ -526,7 +575,7 @@ template <int N_, int K_> struct State {
                         if (board[to].color == target &&
                             !uf.same(board[to].index, board[from].index)) {
                             connections[i] = {from, to};
-                            const auto con = Connect(connections[i]);
+                            const auto con = Connect(connections[i], true);
                             assert(con);
                             n_connections++;
                             goto connected;
@@ -540,6 +589,17 @@ template <int N_, int K_> struct State {
                 break;
 
             connected:;
+            }
+        }
+
+        if constexpr (kCheckPerf) {
+            const auto t1 = Time();
+            t_conn_2 += t1 - t0;
+            t0 = t1;
+
+            if (iteration % 50000 == 0) {
+                // cerr << "t_move,t_conn_1,t_conn_2=";
+                // cerr << t_move << "," << t_conn_1 << "," << t_conn_2 << endl;
             }
         }
     }
@@ -583,13 +643,6 @@ inline double MonotonicFunction(const double start, const double end,
 inline double Temperature(const double t) {
     // return MonotonicFunction(20.0, 2.0, -3.0, 2.0, t);
     return MonotonicFunction(5.0, 0.5, 0.0, 0.0, t);
-    // 100/3 -> 5477.54
-    // 50/3 -> 5873.58
-    // 20/2 -> 6296.9
-    // 20/2/-3/2 -> 6373.37
-    // 10/1 -> 6378.03
-    // 5/0.5 -> 6397.73
-    // 5/0.5/制限時間倍 -> 6670.33
 }
 
 template <int N, int K> void SolveN() {

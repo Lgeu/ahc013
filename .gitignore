@@ -2,3 +2,4 @@
 *.zip
 /tools/*
 *.html
+perf.data*
