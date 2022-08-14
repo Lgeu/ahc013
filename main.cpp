@@ -299,11 +299,10 @@ template <int N_, int K_> struct State {
     static constexpr auto N = N_;
     static constexpr auto K = K_;
     Board<Cell, N, N> board; // 最終状態
-    array<Point, 100> where1;
-    array<Point, 100> where2;
+    array<array<Point, 100>, 2> where12;
     double score;
 
-    UnionFind uf1, uf2;
+    array<UnionFind, 2> ufs;
 
     array<Move, K * 100> moves;
     int n_moves;
@@ -312,8 +311,8 @@ template <int N_, int K_> struct State {
     int n_connections;
 
     State()
-        : board(), where1(), where2(), score(), uf1(), uf2(), moves(),
-          n_moves(), connections(), n_connections() {}
+        : board(), where12(), score(), ufs(), moves(), n_moves(), connections(),
+          n_connections() {}
 
     inline int RemainingMoves() const {
         return K * 100 - n_moves - n_connections;
@@ -339,28 +338,23 @@ template <int N_, int K_> struct State {
         assert(board[pp.to].color == 0);
         board[pp.to] = board[pp.from];
         board[pp.from] = {};
-        if (board[pp.to].color == 1)
-            where1[board[pp.to].index] = pp.to;
-        else if (board[pp.to].color == 2)
-            where2[board[pp.to].index] = pp.to;
+        if (board[pp.to].color <= 2)
+            where12[board[pp.to].color - 1][board[pp.to].index] = pp.to;
     }
 
     inline bool Connect(Move pp, bool no_check = false) {
         const auto index_from = board[pp.from].index;
         const auto index_to = board[pp.to].index;
+
         if (!no_check) {
             // 右か下を仮定
             if (board[pp.from].color != board[pp.to].color)
                 return false;
             if (board[pp.from].color != 1 && board[pp.from].color != 2)
                 return false;
-            if (board[pp.from].color == 1) {
-                if (uf1.same(index_from, index_to))
-                    return false;
-            } else {
-                if (uf2.same(index_from, index_to))
-                    return false;
-            }
+            auto& uf = ufs[board[pp.from].color - 1];
+            if (uf.same(index_from, index_to))
+                return false;
             if (pp.from.y == pp.to.y) {
                 for (auto x = pp.from.x + 1; x < pp.to.x; x++)
                     if (board[{(int)pp.from.y, x}].color != 0)
@@ -374,23 +368,19 @@ template <int N_, int K_> struct State {
         }
 
         // ここまで来れば接続可能
-        if (pp.from.y == pp.to.y) {
-            for (auto x = pp.from.x + 1; x < pp.to.x; x++)
-                board[{(int)pp.from.y, x}].color = 9;
-        } else {
-            assert(pp.from.x == pp.to.x);
-            for (auto y = pp.from.y + 1; y < pp.to.y; y++)
-                board[{y, (int)pp.from.x}].color = 9;
+        {
+            auto& uf = ufs[board[pp.from].color - 1];
+            if (pp.from.y == pp.to.y) {
+                for (auto x = pp.from.x + 1; x < pp.to.x; x++)
+                    board[{(int)pp.from.y, x}].color = 9;
+            } else {
+                assert(pp.from.x == pp.to.x);
+                for (auto y = pp.from.y + 1; y < pp.to.y; y++)
+                    board[{y, (int)pp.from.x}].color = 9;
+            }
+            score += uf.size(index_from) * uf.size(index_to);
+            uf.unite(index_from, index_to);
         }
-
-        if (board[pp.from].color == 1) {
-            score += uf1.size(index_from) * uf1.size(index_to);
-            uf1.unite(index_from, index_to);
-        } else {
-            score += uf2.size(index_from) * uf2.size(index_to);
-            uf2.unite(index_from, index_to);
-        }
-
         return true;
     }
 
@@ -398,6 +388,8 @@ template <int N_, int K_> struct State {
         // inplace で処理する
         // ランダムで 1 手消去する
         // 空いていたら、1/2 で手を追加
+
+        static constexpr auto kRadius = 3;
 
         static constexpr auto kCheckPerf = true;
         static auto t_move = 0.0;
@@ -411,10 +403,10 @@ template <int N_, int K_> struct State {
         }
 
         board = initial_board.board;
-        where1 = initial_board.where[1];
-        where2 = initial_board.where[2];
-        uf1 = UnionFind();
-        uf2 = UnionFind();
+        where12[0] = initial_board.where[1];
+        where12[1] = initial_board.where[2];
+        ufs[0] = UnionFind();
+        ufs[1] = UnionFind();
         score = 0.0;
 
         assert(n_moves + n_connections <= K * 100);
@@ -426,6 +418,21 @@ template <int N_, int K_> struct State {
         auto empty_indices = array<short, K * 100>(); // 後ろはconnection
         auto n_empty_indices = 0;
         auto n_seen_connections = 0;
+
+        // 変化させる位置を決める
+        // これ毎回変えるべきか……？
+        auto target_center = Point();
+        {
+            const auto target_num = uniform_int_distribution<>(0, 1)(rng);
+            auto mi = 101;
+            for (auto trial = 0; trial < 5; trial++) {
+                const auto index = uniform_int_distribution<>(0, 99)(rng);
+                const auto siz = ufs[target_num].size(index);
+                if (chmin(mi, siz)) {
+                    target_center = where12[target_num][index];
+                }
+            }
+        }
 
         for (auto i = 0; i < K * 100; i++) {
             if (!moves[i].Empty()) {
@@ -455,21 +462,39 @@ template <int N_, int K_> struct State {
 
             if (moves[i].Empty() && connections[i].Empty()) {
                 // 1/2 でスキップ
-                const auto r = uniform_real_distribution<>()(rng);
-                if (r < 0.5) { // パラメータ
+                const auto rn = uniform_real_distribution<>()(rng);
+                if (rn < 0.5) { // パラメータ
                     empty_indices[n_empty_indices++] = i;
                     continue;
                 }
 
                 // 移動を追加
+                auto trial = 0;
                 do {
+                    if (trial >= 50) {
+                        empty_indices[n_empty_indices++] = i;
+                        break;
+                    }
+                    trial++;
                     const auto rc = uniform_int_distribution<>(0, 1)(rng);
                     if (rc == 0) {
                         // 横
+                        // const auto y =
+                        //     uniform_int_distribution<>(0, N - 1)(rng);
+                        // const auto x =
+                        //     uniform_int_distribution<>(0, N - 2)(rng);
                         const auto y =
-                            uniform_int_distribution<>(0, N - 1)(rng);
+                            target_center.y +
+                            uniform_int_distribution<>(0, kRadius)(rng) -
+                            uniform_int_distribution<>(0, kRadius)(rng);
+                        if (y < 0 || N <= y)
+                            continue;
                         const auto x =
-                            uniform_int_distribution<>(0, N - 2)(rng);
+                            target_center.x +
+                            uniform_int_distribution<>(0, kRadius - 1)(rng) -
+                            uniform_int_distribution<>(0, kRadius)(rng);
+                        if (x < 0 || N - 1 <= x)
+                            continue;
                         const auto l = Point(y, x);
                         const auto r = Point(y, x + 1);
                         if ((board[l].color == 0) == (board[r].color == 0))
@@ -483,10 +508,22 @@ template <int N_, int K_> struct State {
                         }
                     } else {
                         // 縦
+                        // const auto x =
+                        //     uniform_int_distribution<>(0, N - 1)(rng);
+                        // const auto y =
+                        //     uniform_int_distribution<>(0, N - 2)(rng);
                         const auto x =
-                            uniform_int_distribution<>(0, N - 1)(rng);
+                            target_center.x +
+                            uniform_int_distribution<>(0, kRadius)(rng) -
+                            uniform_int_distribution<>(0, kRadius)(rng);
+                        if (x < 0 || N <= x)
+                            continue;
                         const auto y =
-                            uniform_int_distribution<>(0, N - 2)(rng);
+                            target_center.y +
+                            uniform_int_distribution<>(0, kRadius - 1)(rng) -
+                            uniform_int_distribution<>(0, kRadius)(rng);
+                        if (y < 0 || N - 1 <= y)
+                            continue;
                         const auto u = Point(y, x);
                         const auto d = Point(y + 1, x);
                         if ((board[u].color == 0) == (board[d].color == 0))
@@ -499,9 +536,9 @@ template <int N_, int K_> struct State {
                             moves[i] = {u, d};
                         }
                     }
+                    n_moves++;
                     break;
                 } while (true);
-                n_moves++;
             }
 
             // 盤面を更新
@@ -547,8 +584,8 @@ template <int N_, int K_> struct State {
             iota(order.begin(), order.end(), 0);
             shuffle(order.begin(), order.end(), rng);
             auto idx_order = 0;
-            auto& uf = target == 1 ? uf1 : uf2;
-            const auto& where = target == 1 ? where1 : where2;
+            auto& uf = ufs[target - 1];
+            const auto& where = where12[target - 1];
 
             for (; idx_empty_indices < n_empty_indices; idx_empty_indices++) {
                 const auto i = empty_indices[idx_empty_indices];
