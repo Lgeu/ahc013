@@ -3,3 +3,4 @@
 /tools/*
 *.html
 perf.data*
+.ipynb_checkpoints
