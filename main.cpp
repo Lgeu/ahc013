@@ -554,6 +554,44 @@ template <int N_, int K_> struct State {
     }
 };
 
+inline double sigmoid(const double& a, const double& x) {
+    return 1.0 / (1.0 + exp(-a * x));
+}
+
+// f: [0, 1] -> [0, 1]
+inline double MonotonicallyIncreasingFunction(const double a, const double b,
+                                              const double x) {
+    if (a == 0.0)
+        return x;
+    const double x_left = a > 0 ? -b - 0.5 : b - 0.5;
+    const double x_right = x_left + 1.0;
+    const double left = sigmoid(a, x_left);
+    const double right = sigmoid(a, x_right);
+    const double y = sigmoid(a, x + x_left);
+    return (y - left) /
+           (right - left); // left とかが大きい値になると誤差がヤバイ　最悪 0
+                           // 除算になる  // b が正なら大丈夫っぽい
+}
+
+// f: [0, 1] -> [start, end]
+inline double MonotonicFunction(const double start, const double end,
+                                const double a, const double b,
+                                const double x) {
+    return MonotonicallyIncreasingFunction(a, b, x) * (end - start) + start;
+}
+
+inline double Temperature(const double t) {
+    // return MonotonicFunction(20.0, 2.0, -3.0, 2.0, t);
+    return MonotonicFunction(5.0, 0.5, 0.0, 0.0, t);
+    // 100/3 -> 5477.54
+    // 50/3 -> 5873.58
+    // 20/2 -> 6296.9
+    // 20/2/-3/2 -> 6373.37
+    // 10/1 -> 6378.03
+    // 5/0.5 -> 6397.73
+    // 5/0.5/制限時間倍 -> 6670.33
+}
+
 template <int N, int K> void SolveN() {
     auto input = Input<N>();
     input.Read();
@@ -561,11 +599,19 @@ template <int N, int K> void SolveN() {
 
     auto t0 = Time();
     auto iteration = 0;
+    static constexpr auto kTimeLimit = 2.9;
 
-    while (Time() - t0 < 2.9) {
+    while (true) {
+        const auto t = Time() - t0;
+        if (t > kTimeLimit)
+            break;
+        const auto progress_rate = t / kTimeLimit;
         auto updated_state = state;
         updated_state.RandomUpdate(input);
-        if (updated_state.score > state.score) {
+        const auto gain = updated_state.score - state.score;
+        const auto temperature = Temperature(progress_rate);
+        const auto acceptance_proba = exp(gain / temperature);
+        if (uniform_real_distribution<>()(rng) < acceptance_proba) {
             state = updated_state;
         }
         iteration++;
