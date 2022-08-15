@@ -68,6 +68,18 @@ using namespace std;
 using ll = long long;
 constexpr double PI = 3.1415926535897932;
 
+// パラメータ
+static constexpr auto kErase = 2;             // OPTIMIZE [1, 5]
+static constexpr auto kRadius = 3;            // OPTIMIZE [2, 6]
+static constexpr auto kAnnealingA = 0.0;      // OPTIMIZE [-15.0, 15.0]
+static constexpr auto kAnnealingB = 0.0;      // OPTIMIZE [0.0, 3.0]
+static constexpr auto kAnnealingStart = 10.0; // OPTIMIZE LOG [1.0, 100.0]
+static constexpr auto kSkipRatio = 0.5;       // OPTIMIZE [0.2, 0.8]
+static constexpr auto kTargetDeterminationTrials = 5; // OPTIMIZE LOG [1, 20]
+static constexpr auto kAttractionRatio = 0.1;      // OPTIMIZE LOG [0.01, 0.9]
+static constexpr auto kMaxAttractionDistance = 11; // OPTIMIZE LOG [4, 99]
+static constexpr auto kStartAttraction = 0.01;     // OPTIMIZE LOG [0.001, 0.9]
+
 template <class T, class S> inline bool chmin(T& m, S q) {
     if (m > q) {
         m = q;
@@ -497,12 +509,10 @@ template <int N_, int K_> struct State {
     }
 
     void RandomUpdate(const Input<N>& initial_board, const int iter,
-                      array<BFS<N>, 2>& bfss) {
+                      array<BFS<N>, 2>& bfss, const double progress) {
         // inplace で処理する
         // ランダムで 1 手消去する
         // 空いていたら、1/2 で手を追加
-
-        static constexpr auto kRadius = 3;
 
         static constexpr auto kCheckPerf = true;
         static auto t_move = 0.0;
@@ -516,8 +526,8 @@ template <int N_, int K_> struct State {
         // 移動に引力を持たせる
         // iteration は古いもの
         auto attraction_enabled =
-            iteration >= 100 &&
-            uniform_real_distribution<>()(rng) < 0.1; //パラメータ
+            iteration >= 100 && progress > kStartAttraction &&
+            uniform_real_distribution<>()(rng) < kAttractionRatio;
         const auto attraction_target_num =
             attraction_enabled ? uniform_int_distribution<>(1, 2)(rng) : -1;
         auto attracted_index = -1;
@@ -534,12 +544,10 @@ template <int N_, int K_> struct State {
             auto n_candidates = 0.0;
             for (auto index = 0; index < 100; index++) {
                 assert(board[where[index]].color == attraction_target_num);
-                // cerr << "p=" << (int)where[index].y << ","
-                //      << (int)where[index].x << " - ";
-                // cerr << (int)bfs.result[where[index]] << endl;
                 assert(bfs.result[where[index]] % 2 != 0 ||
                        bfs.result[where[index]] == 120);
-                if (bfs.result[where[index]] >= 2) {
+                if (bfs.result[where[index]] >= 2 &&
+                    bfs.result[where[index]] <= kMaxAttractionDistance) {
                     if (uniform_real_distribution<>(0.0, ++n_candidates)(rng) <
                         1.0) {
                         attracted_index = index;
@@ -559,7 +567,7 @@ template <int N_, int K_> struct State {
         score = 0.0;
 
         assert(n_moves + n_connections <= K * 100);
-        auto steps_erase = array<int, 2>();
+        auto steps_erase = array<int, kErase>();
         for (auto& s : steps_erase)
             s = n_moves + n_connections == 0
                     ? -1
@@ -576,7 +584,7 @@ template <int N_, int K_> struct State {
         if (!attraction_enabled) {
             const auto target_num = uniform_int_distribution<>(0, 1)(rng);
             auto mi = 101;
-            for (auto trial = 0; trial < 5; trial++) {
+            for (auto trial = 0; trial < kTargetDeterminationTrials; trial++) {
                 const auto index = uniform_int_distribution<>(0, 99)(rng);
                 const auto siz = ufs[target_num].size(index);
                 if (chmin(mi, siz)) {
@@ -587,15 +595,21 @@ template <int N_, int K_> struct State {
 
         for (auto i = 0; i < K * 100; i++) {
             if (!moves[i].Empty()) {
-                if (nth_move == steps_erase[0] || nth_move == steps_erase[1]) {
-                    moves[i].Reset();
-                    n_moves--;
+                for (const auto s : steps_erase) {
+                    if (nth_move == s) {
+                        moves[i].Reset();
+                        n_moves--;
+                        break;
+                    }
                 }
                 nth_move++;
             } else if (!connections[i].Empty()) {
-                if (nth_move == steps_erase[0] || nth_move == steps_erase[1]) {
-                    connections[i].Reset();
-                    n_connections--;
+                for (const auto s : steps_erase) {
+                    if (nth_move == s) {
+                        connections[i].Reset();
+                        n_connections--;
+                        break;
+                    }
                 }
                 nth_move++;
             }
@@ -614,7 +628,7 @@ template <int N_, int K_> struct State {
             if (moves[i].Empty() && connections[i].Empty()) {
                 // 1/2 でスキップ
                 const auto rn = uniform_real_distribution<>()(rng);
-                if (rn < 0.5) { // パラメータ
+                if (rn < kSkipRatio) {
                     empty_indices[n_empty_indices++] = i;
                     continue;
                 }
@@ -866,7 +880,7 @@ inline double MonotonicFunction(const double start, const double end,
 
 inline double Temperature(const double t) {
     // return MonotonicFunction(20.0, 2.0, -3.0, 2.0, t);
-    return MonotonicFunction(5.0, 0.5, 0.0, 0.0, t);
+    return MonotonicFunction(kAnnealingStart, 0.5, kAnnealingA, kAnnealingB, t);
 }
 
 template <int N, int K> void SolveN() {
@@ -885,7 +899,7 @@ template <int N, int K> void SolveN() {
             break;
         const auto progress_rate = t / kTimeLimit;
         auto updated_state = state;
-        updated_state.RandomUpdate(input, iteration, bfss);
+        updated_state.RandomUpdate(input, iteration, bfss, progress_rate);
         const auto gain = updated_state.score - state.score;
         const auto temperature = Temperature(progress_rate);
         const auto acceptance_proba = exp(gain / temperature);
@@ -921,7 +935,7 @@ int main() {
     Solve();
 }
 
-#ifdef __GNUC__
+#ifdef __clang__
 #pragma clang attribute pop
 #endif
 
