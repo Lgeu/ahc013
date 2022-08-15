@@ -1,5 +1,3 @@
-#pragma once
-
 #ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS
 #endif
@@ -174,6 +172,10 @@ template <typename T> struct Vec2 {
     inline double phase_deg() const { // [-180, 180) のはず
         return phase() * (180.0 / PI);
     }
+    inline Vec2 Right() const { return {y, (T)(x + 1)}; }
+    inline Vec2 Down() const { return {(T)(y + 1), x}; }
+    inline Vec2 Left() const { return {y, (T)(x - 1)}; }
+    inline Vec2 Up() const { return {(T)(y - 1), x}; }
 };
 template <typename T, typename S>
 inline Vec2<T> operator*(const S& lhs, const Vec2<T>& rhs) {
@@ -296,6 +298,113 @@ struct UnionFind {
     inline int same(signed char x, signed char y) { return find(x) == find(y); }
 };
 
+template <int N> struct BFS {
+    // 最も size が大きい 1, 2 からの距離
+    Board<signed char, N, N> result;
+    int iteration;
+
+    BFS() : result(), iteration(-1) {}
+
+    void Search(const Board<Cell, N, N>& board, UnionFind& uf,
+                const array<Point, 100>& where, const int iter) {
+        iteration = iter;
+        result.Fill((signed char)127);
+
+        auto max_size = 0;
+        auto best_indices = array<signed char, 100>();
+        auto n_best_indices = 0;
+        for (auto index = (signed char)0; index < 100; index++) {
+            const auto siz = uf.size(index);
+            if (chmax(max_size, siz)) {
+                best_indices[0] = index;
+                n_best_indices = 1;
+            } else if (max_size == siz) {
+                best_indices[n_best_indices++] = index;
+            }
+        }
+
+        array<Point, N * N> q;
+        auto q_left = 0;
+        auto q_right = 0;
+        for (auto idx_best_indices = 0; idx_best_indices < n_best_indices;
+             idx_best_indices++) {
+            const auto c = where[best_indices[idx_best_indices]];
+            assert(board[c].color != 0);
+            result[c] = 1;
+            // 右
+            for (auto p = c.Right();
+                 p.x < N && board[p].color == 0 && result[p] == 127; p.x++) {
+                result[p] = 0;
+                q[q_right++] = p;
+            }
+            // 左
+            for (auto p = c.Left();
+                 p.x >= 0 && board[p].color == 0 && result[p] == 127; p.x--) {
+                result[p] = 0;
+                q[q_right++] = p;
+            }
+            // 下
+            for (auto p = c.Down();
+                 p.y < N && board[p].color == 0 && result[p] == 127; p.y++) {
+                result[p] = 0;
+                q[q_right++] = p;
+            }
+            // 上
+            for (auto p = c.Up();
+                 p.y >= 0 && board[p].color == 0 && result[p] == 127; p.y--) {
+                result[p] = 0;
+                q[q_right++] = p;
+            }
+        }
+
+        while (q_left != q_right) {
+            const auto v = q[q_left++];
+            assert(board[v].color == 0 || board[v].color == 9);
+            assert(result[v] % 2 == 0 || result[v] == 120);
+            const auto r = v.Right();
+            if (r.x < N && result[r] == 127) {
+                if (board[r].color == 0 || board[r].color == 9) {
+                    result[r] = result[v] + 2;
+                    q[q_right++] = r;
+                } else {
+                    result[r] = result[v] + 3;
+                }
+                chmin(result[r], 120);
+            }
+            const auto l = v.Left();
+            if (l.x >= 0 && result[l] == 127) {
+                if (board[l].color == 0 || board[l].color == 9) {
+                    result[l] = result[v] + 2;
+                    q[q_right++] = l;
+                } else {
+                    result[l] = result[v] + 3;
+                }
+                chmin(result[l], 120);
+            }
+            const auto d = v.Down();
+            if (d.y < N && result[d] == 127) {
+                if (board[d].color == 0 || board[d].color == 9) {
+                    result[d] = result[v] + 2;
+                    q[q_right++] = d;
+                } else {
+                    result[d] = result[v] + 3;
+                }
+                chmin(result[d], 120);
+            }
+            const auto u = v.Up();
+            if (u.y >= 0 && result[u] == 127) {
+                if (board[u].color == 0 || board[u].color == 9) {
+                    result[u] = result[v] + 2;
+                    q[q_right++] = u;
+                } else {
+                    result[u] = result[v] + 3;
+                }
+                chmin(result[u], 120);
+            }
+        }
+    }
+};
+
 template <int N_, int K_> struct State {
     static constexpr auto N = N_;
     static constexpr auto K = K_;
@@ -311,9 +420,11 @@ template <int N_, int K_> struct State {
     array<Move, K * 100> connections;
     int n_connections;
 
+    int iteration;
+
     State()
         : board(), where12(), score(), ufs(), moves(), n_moves(), connections(),
-          n_connections() {}
+          n_connections(), iteration() {}
 
     inline int RemainingMoves() const {
         return K * 100 - n_moves - n_connections;
@@ -385,7 +496,8 @@ template <int N_, int K_> struct State {
         return true;
     }
 
-    void RandomUpdate(const Input<N>& initial_board) {
+    void RandomUpdate(const Input<N>& initial_board, const int iter,
+                      array<BFS<N>, 2>& bfss) {
         // inplace で処理する
         // ランダムで 1 手消去する
         // 空いていたら、1/2 で手を追加
@@ -397,12 +509,48 @@ template <int N_, int K_> struct State {
         static auto t_conn_1 = 0.0;
         static auto t_conn_2 = 0.0;
         static auto t0 = 0.0;
-        static auto iteration = 0;
         if constexpr (kCheckPerf) {
             t0 = Time();
-            iteration++;
         }
 
+        // 移動に引力を持たせる
+        // iteration は古いもの
+        auto attraction_enabled =
+            iteration >= 100 &&
+            uniform_real_distribution<>()(rng) < 0.1; //パラメータ
+        const auto attraction_target_num =
+            attraction_enabled ? uniform_int_distribution<>(1, 2)(rng) : -1;
+        auto attracted_index = -1;
+        if (attraction_enabled) {
+            // 予め BFS しておく
+            // iteration, board, where は古いもの
+            auto& bfs = bfss[attraction_target_num - 1];
+            const auto& where = where12[attraction_target_num - 1];
+            if (iteration != bfs.iteration) {
+                bfss[attraction_target_num - 1].Search(
+                    board, ufs[attraction_target_num - 1], where, iteration);
+            }
+            // 引きつけられる機械を選ぶ
+            auto n_candidates = 0.0;
+            for (auto index = 0; index < 100; index++) {
+                assert(board[where[index]].color == attraction_target_num);
+                // cerr << "p=" << (int)where[index].y << ","
+                //      << (int)where[index].x << " - ";
+                // cerr << (int)bfs.result[where[index]] << endl;
+                assert(bfs.result[where[index]] % 2 != 0 ||
+                       bfs.result[where[index]] == 120);
+                if (bfs.result[where[index]] >= 2) {
+                    if (uniform_real_distribution<>(0.0, ++n_candidates)(rng) <
+                        1.0) {
+                        attracted_index = index;
+                    }
+                }
+            }
+            if (attracted_index == -1)
+                attraction_enabled = false;
+        }
+
+        iteration = iter;
         board = initial_board.board;
         where12[0] = initial_board.where[1];
         where12[1] = initial_board.where[2];
@@ -425,7 +573,7 @@ template <int N_, int K_> struct State {
         // 変化させる位置を決める
         // これ毎回変えるべきか……？
         auto target_center = Point();
-        {
+        if (!attraction_enabled) {
             const auto target_num = uniform_int_distribution<>(0, 1)(rng);
             auto mi = 101;
             for (auto trial = 0; trial < 5; trial++) {
@@ -472,76 +620,112 @@ template <int N_, int K_> struct State {
                 }
 
                 // 移動を追加
-                auto trial = 0;
-                do {
-                    if (trial >= 50) {
+                if (attraction_enabled) {
+                    const auto p =
+                        where12[attraction_target_num - 1][attracted_index];
+                    const auto& distance_board =
+                        bfss[attraction_target_num - 1].result;
+                    auto min_distance = distance_board[p];
+                    auto best_destination = Point(-1, -1);
+                    assert(board[p].color == attraction_target_num);
+
+                    const auto r = p.Right();
+                    if (r.x < N && board[r].color == 0 &&
+                        chmin(min_distance, distance_board[r]))
+                        best_destination = r;
+                    const auto l = p.Left();
+                    if (l.x >= 0 && board[l].color == 0 &&
+                        chmin(min_distance, distance_board[l]))
+                        best_destination = l;
+                    const auto d = p.Down();
+                    if (d.y < N && board[d].color == 0 &&
+                        chmin(min_distance, distance_board[d]))
+                        best_destination = d;
+                    const auto u = p.Up();
+                    if (u.y >= 0 && board[u].color == 0 &&
+                        chmin(min_distance, distance_board[u]))
+                        best_destination = u;
+
+                    if (best_destination.y == -1) {
                         empty_indices[n_empty_indices++] = i;
-                        break;
-                    }
-                    trial++;
-                    const auto rc = uniform_int_distribution<>(0, 1)(rng);
-                    if (rc == 0) {
-                        // 横
-                        // const auto y =
-                        //     uniform_int_distribution<>(0, N - 1)(rng);
-                        // const auto x =
-                        //     uniform_int_distribution<>(0, N - 2)(rng);
-                        const auto y =
-                            target_center.y +
-                            uniform_int_distribution<>(0, kRadius)(rng) -
-                            uniform_int_distribution<>(0, kRadius)(rng);
-                        if (y < 0 || N <= y)
-                            continue;
-                        const auto x =
-                            target_center.x +
-                            uniform_int_distribution<>(0, kRadius - 1)(rng) -
-                            uniform_int_distribution<>(0, kRadius)(rng);
-                        if (x < 0 || N - 1 <= x)
-                            continue;
-                        const auto l = Point(y, x);
-                        const auto r = Point(y, x + 1);
-                        if ((board[l].color == 0) == (board[r].color == 0))
-                            continue;
-                        if (board[l].color == 0) {
-                            // ←
-                            moves[i] = {r, l};
-                        } else {
-                            // →
-                            moves[i] = {l, r};
-                        }
                     } else {
-                        // 縦
-                        // const auto x =
-                        //     uniform_int_distribution<>(0, N - 1)(rng);
-                        // const auto y =
-                        //     uniform_int_distribution<>(0, N - 2)(rng);
-                        const auto x =
-                            target_center.x +
-                            uniform_int_distribution<>(0, kRadius)(rng) -
-                            uniform_int_distribution<>(0, kRadius)(rng);
-                        if (x < 0 || N <= x)
-                            continue;
-                        const auto y =
-                            target_center.y +
-                            uniform_int_distribution<>(0, kRadius - 1)(rng) -
-                            uniform_int_distribution<>(0, kRadius)(rng);
-                        if (y < 0 || N - 1 <= y)
-                            continue;
-                        const auto u = Point(y, x);
-                        const auto d = Point(y + 1, x);
-                        if ((board[u].color == 0) == (board[d].color == 0))
-                            continue;
-                        if (board[u].color == 0) {
-                            // ↑
-                            moves[i] = {d, u};
-                        } else {
-                            // ↓
-                            moves[i] = {u, d};
-                        }
+                        moves[i] = {p, best_destination};
+                        n_moves++;
                     }
-                    n_moves++;
-                    break;
-                } while (true);
+                } else {
+                    auto trial = 0;
+                    do {
+                        if (trial >= 50) {
+                            empty_indices[n_empty_indices++] = i;
+                            break;
+                        }
+                        trial++;
+                        const auto rc = uniform_int_distribution<>(0, 1)(rng);
+                        if (rc == 0) {
+                            // 横
+                            // const auto y =
+                            //     uniform_int_distribution<>(0, N - 1)(rng);
+                            // const auto x =
+                            //     uniform_int_distribution<>(0, N - 2)(rng);
+                            const auto y =
+                                target_center.y +
+                                uniform_int_distribution<>(0, kRadius)(rng) -
+                                uniform_int_distribution<>(0, kRadius)(rng);
+                            if (y < 0 || N <= y)
+                                continue;
+                            const auto x =
+                                target_center.x +
+                                uniform_int_distribution<>(0,
+                                                           kRadius - 1)(rng) -
+                                uniform_int_distribution<>(0, kRadius)(rng);
+                            if (x < 0 || N - 1 <= x)
+                                continue;
+                            const auto l = Point(y, x);
+                            const auto r = Point(y, x + 1);
+                            if ((board[l].color == 0) == (board[r].color == 0))
+                                continue;
+                            if (board[l].color == 0) {
+                                // ←
+                                moves[i] = {r, l};
+                            } else {
+                                // →
+                                moves[i] = {l, r};
+                            }
+                        } else {
+                            // 縦
+                            // const auto x =
+                            //     uniform_int_distribution<>(0, N - 1)(rng);
+                            // const auto y =
+                            //     uniform_int_distribution<>(0, N - 2)(rng);
+                            const auto x =
+                                target_center.x +
+                                uniform_int_distribution<>(0, kRadius)(rng) -
+                                uniform_int_distribution<>(0, kRadius)(rng);
+                            if (x < 0 || N <= x)
+                                continue;
+                            const auto y =
+                                target_center.y +
+                                uniform_int_distribution<>(0,
+                                                           kRadius - 1)(rng) -
+                                uniform_int_distribution<>(0, kRadius)(rng);
+                            if (y < 0 || N - 1 <= y)
+                                continue;
+                            const auto u = Point(y, x);
+                            const auto d = Point(y + 1, x);
+                            if ((board[u].color == 0) == (board[d].color == 0))
+                                continue;
+                            if (board[u].color == 0) {
+                                // ↑
+                                moves[i] = {d, u};
+                            } else {
+                                // ↓
+                                moves[i] = {u, d};
+                            }
+                        }
+                        n_moves++;
+                        break;
+                    } while (true);
+                }
             }
 
             // 盤面を更新
@@ -654,7 +838,7 @@ template <int N_, int K_> struct State {
     }
 };
 
-inline double sigmoid(const double& a, const double& x) {
+inline double sigmoid(const double a, const double x) {
     return 1.0 / (1.0 + exp(-a * x));
 }
 
@@ -689,6 +873,7 @@ template <int N, int K> void SolveN() {
     auto input = Input<N>();
     input.Read();
     auto state = State<N, K>();
+    auto bfss = array<BFS<N>, 2>();
 
     auto t0 = Time();
     auto iteration = 0;
@@ -700,7 +885,7 @@ template <int N, int K> void SolveN() {
             break;
         const auto progress_rate = t / kTimeLimit;
         auto updated_state = state;
-        updated_state.RandomUpdate(input);
+        updated_state.RandomUpdate(input, iteration, bfss);
         const auto gain = updated_state.score - state.score;
         const auto temperature = Temperature(progress_rate);
         const auto acceptance_proba = exp(gain / temperature);
