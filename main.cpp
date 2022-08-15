@@ -410,10 +410,12 @@ template <int N_, int K_> struct State {
         score = 0.0;
 
         assert(n_moves + n_connections <= K * 100);
-        const auto step_erase = n_moves + n_connections == 0
-                                    ? -1
-                                    : uniform_int_distribution<>(
-                                          0, n_moves + n_connections - 1)(rng);
+        auto steps_erase = array<int, 2>();
+        for (auto& s : steps_erase)
+            s = n_moves + n_connections == 0
+                    ? -1
+                    : uniform_int_distribution<>(0, n_moves + n_connections -
+                                                        1)(rng);
         auto nth_move = 0;
         auto empty_indices = array<short, K * 100>(); // 後ろはconnection
         auto n_empty_indices = 0;
@@ -436,13 +438,13 @@ template <int N_, int K_> struct State {
 
         for (auto i = 0; i < K * 100; i++) {
             if (!moves[i].Empty()) {
-                if (nth_move == step_erase) {
+                if (nth_move == steps_erase[0] || nth_move == steps_erase[1]) {
                     moves[i].Reset();
                     n_moves--;
                 }
                 nth_move++;
             } else if (!connections[i].Empty()) {
-                if (nth_move == step_erase) {
+                if (nth_move == steps_erase[0] || nth_move == steps_erase[1]) {
                     connections[i].Reset();
                     n_connections--;
                 }
@@ -704,7 +706,10 @@ template <int N, int K> void SolveN() {
         if (uniform_real_distribution<>()(rng) < acceptance_proba) {
             state = updated_state;
         }
+
         iteration++;
+        // if (iteration % 10000 == 0)
+        //     state.Print();
     }
 
     state.Print();
@@ -730,8 +735,10 @@ int main() {
     Solve();
 }
 
-// 最後に↓を貼る
 #ifdef __GNUC__
 #pragma clang attribute pop
 #endif
-// 最後に↑を貼る
+
+// python3 score_all.py
+// flamegraph -- ./a.out < ./tools/in/0011.txt
+// clang++ main.cpp -Wall -Wextra -std=c++17 -g -O2
