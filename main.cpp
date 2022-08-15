@@ -422,9 +422,17 @@ template <int N_, int K_> struct State {
 
     int iteration;
 
+    enum Flags : unsigned char {
+        kRightFlag = 1,
+        kLeftFlag = 2,
+        kDownFlag = 4,
+        kUpFlag = 8
+    };
+    array<array<unsigned char, 100>, 2> connection_flags;
+
     State()
         : board(), where12(), score(), ufs(), moves(), n_moves(), connections(),
-          n_connections(), iteration() {}
+          n_connections(), iteration(), connection_flags() {}
 
     inline int RemainingMoves() const {
         return K * 100 - n_moves - n_connections;
@@ -481,14 +489,19 @@ template <int N_, int K_> struct State {
 
         // ここまで来れば接続可能
         {
-            auto& uf = ufs[board[pp.from].color - 1];
+            const auto& color = board[pp.from].color;
+            auto& uf = ufs[color - 1];
             if (pp.from.y == pp.to.y) {
                 for (auto x = pp.from.x + 1; x < pp.to.x; x++)
                     board[{(int)pp.from.y, x}].color = 9;
+                connection_flags[color - 1][index_from] |= kRightFlag;
+                connection_flags[color - 1][index_to] |= kLeftFlag;
             } else {
                 assert(pp.from.x == pp.to.x);
                 for (auto y = pp.from.y + 1; y < pp.to.y; y++)
                     board[{y, (int)pp.from.x}].color = 9;
+                connection_flags[color - 1][index_from] |= kDownFlag;
+                connection_flags[color - 1][index_to] |= kUpFlag;
             }
             score += uf.size(index_from) * uf.size(index_to);
             uf.unite(index_from, index_to);
@@ -511,6 +524,43 @@ template <int N_, int K_> struct State {
         static auto t0 = 0.0;
         if constexpr (kCheckPerf) {
             t0 = Time();
+        }
+
+        // 要らない移動を消す
+        const auto juggernaut_enabled =
+            uniform_real_distribution<>()(rng) < 0.02; //パラメータ
+        if (juggernaut_enabled) {
+            auto changed = Board<bool, N, N>();
+            for (auto i = K * 100 - 1; i >= 0; i--) {
+                const auto pp = moves[i];
+                if (pp.Empty())
+                    continue;
+                if (changed[pp.from] || changed[pp.to]) {
+                    changed[pp.from] = true;
+                    changed[pp.to] = true;
+                    continue;
+                }
+                changed[pp.from] = true;
+                changed[pp.to] = true;
+                if (board[pp.from].color != 0)
+                    continue;
+                const auto color = board[pp.to].color;
+                if (color == 1 || color == 2) {
+                    auto index = board[pp.to].index;
+                    if (connection_flags[color - 1][index] &
+                        (kRightFlag | kLeftFlag)) {
+                        if (pp.from.y != pp.to.y)
+                            continue;
+                    }
+                    if (connection_flags[color - 1][index] &
+                        (kDownFlag | kUpFlag)) {
+                        if (pp.from.x != pp.to.x)
+                            continue;
+                    }
+                }
+                moves[i].Reset();
+                n_moves--;
+            }
         }
 
         // 移動に引力を持たせる
@@ -557,11 +607,12 @@ template <int N_, int K_> struct State {
         ufs[0] = UnionFind();
         ufs[1] = UnionFind();
         score = 0.0;
+        connection_flags = {};
 
         assert(n_moves + n_connections <= K * 100);
         auto steps_erase = array<int, 2>();
         for (auto& s : steps_erase)
-            s = n_moves + n_connections == 0
+            s = n_moves + n_connections == 0 || juggernaut_enabled
                     ? -1
                     : uniform_int_distribution<>(0, n_moves + n_connections -
                                                         1)(rng);
