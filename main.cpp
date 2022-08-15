@@ -267,7 +267,8 @@ template <int N> struct Input {
                 int c = s[x] - '0';
                 board[{y, x}] = {(signed char)c, (signed char)number_counts[c]};
                 if (c)
-                    where[c][number_counts[c]++] = {y, x};
+                    where[c][number_counts[c]++] = {(signed char)y,
+                                                    (signed char)x};
             }
         }
         assert(number_counts[1] == 100);
@@ -741,4 +742,4 @@ int main() {
 
 // python3 score_all.py
 // flamegraph -- ./a.out < ./tools/in/0011.txt
-// clang++ main.cpp -Wall -Wextra -std=c++17 -g -O2
+// g++ main.cpp -Wall -Wextra -std=c++17 -g -O2
