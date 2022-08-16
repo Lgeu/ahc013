@@ -313,15 +313,21 @@ struct Cell {
     signed char index;
 };
 
-template <int N> struct Input {
-    Board<Cell, N, N> board;
+static constexpr auto max_ns = array<array<int, 4>, 6>{
+    array<int, 4>{},  {}, {20, 26, 32, 39}, {23, 29, 35, 42}, {26, 32, 38, 45},
+    {29, 35, 41, 48},
+};
+
+template <int K, int n_class> struct Input {
+    static constexpr auto max_n = max_ns[K][n_class];
+    Board<Cell, max_n, max_n> board;
     array<array<Point, 100>, 6> where;
     void Read() {
         auto number_counts = array<int, 6>();
-        for (auto y = 0; y < N; y++) {
+        for (auto y = 0; y < input::N; y++) {
             string s;
             cin >> s;
-            for (auto x = 0; x < N; x++) {
+            for (auto x = 0; x < input::N; x++) {
                 int c = s[x] - '0';
                 board[{y, x}] = {(signed char)c, (signed char)number_counts[c]};
                 if (c)
@@ -365,14 +371,16 @@ template <int N, int K> static constexpr auto NClass() {
         return N < 30 ? 0 : N < 36 ? 1 : N < 42 ? 2 : 3;
     return -1;
 }
-template <int N> struct BFS {
+
+template <int K, int n_class> struct BFS {
+    static constexpr auto max_n = max_ns[K][n_class];
     // 最も size が大きい 1, 2 からの距離
-    Board<signed char, N, N> result;
+    Board<signed char, max_n, max_n> result;
     int iteration;
 
     BFS() : result(), iteration(-1) {}
 
-    void Search(const Board<Cell, N, N>& board, UnionFind& uf,
+    void Search(const Board<Cell, max_n, max_n>& board, UnionFind& uf,
                 const array<Point, 100>& where, const int iter) {
         iteration = iter;
         result.Fill((signed char)127);
@@ -390,7 +398,7 @@ template <int N> struct BFS {
             }
         }
 
-        array<Point, N * N> q;
+        array<Point, max_n * max_n> q;
         auto q_left = 0;
         auto q_right = 0;
         for (auto idx_best_indices = 0; idx_best_indices < n_best_indices;
@@ -400,7 +408,8 @@ template <int N> struct BFS {
             result[c] = 1;
             // 右
             for (auto p = c.Right();
-                 p.x < N && board[p].color == 0 && result[p] == 127; p.x++) {
+                 p.x < input::N && board[p].color == 0 && result[p] == 127;
+                 p.x++) {
                 result[p] = 0;
                 q[q_right++] = p;
             }
@@ -412,7 +421,8 @@ template <int N> struct BFS {
             }
             // 下
             for (auto p = c.Down();
-                 p.y < N && board[p].color == 0 && result[p] == 127; p.y++) {
+                 p.y < input::N && board[p].color == 0 && result[p] == 127;
+                 p.y++) {
                 result[p] = 0;
                 q[q_right++] = p;
             }
@@ -429,7 +439,7 @@ template <int N> struct BFS {
             assert(board[v].color == 0 || board[v].color == 9);
             assert(result[v] % 2 == 0 || result[v] == 120);
             const auto r = v.Right();
-            if (r.x < N && result[r] == 127) {
+            if (r.x < input::N && result[r] == 127) {
                 if (board[r].color == 0 || board[r].color == 9) {
                     result[r] = result[v] + 2;
                     q[q_right++] = r;
@@ -449,7 +459,7 @@ template <int N> struct BFS {
                 chmin(result[l], 120);
             }
             const auto d = v.Down();
-            if (d.y < N && result[d] == 127) {
+            if (d.y < input::N && result[d] == 127) {
                 if (board[d].color == 0 || board[d].color == 9) {
                     result[d] = result[v] + 2;
                     q[q_right++] = d;
@@ -472,21 +482,21 @@ template <int N> struct BFS {
     }
 };
 
-template <int N_, int K_> struct State {
-    static constexpr auto N = N_;
+template <int K_, int n_class_> struct State {
+    static constexpr auto n_class = n_class_;
     static constexpr auto K = K_;
-    static constexpr auto n_class = NClass<N, K>();
     static constexpr auto kP = kParams[K][n_class];
-    Board<Cell, N, N> board; // 最終状態
+    static constexpr auto max_n = max_ns[K][n_class];
+    Board<Cell, max_n, max_n> board; // 最終状態
     array<array<Point, 100>, 2> where12;
     double score;
 
     array<UnionFind, 2> ufs;
 
-    array<Move, K * 100> moves;
+    array<Move, 500> moves;
     int n_moves;
 
-    array<Move, K * 100> connections;
+    array<Move, 500> connections;
     int n_connections;
 
     int iteration;
@@ -565,8 +575,8 @@ template <int N_, int K_> struct State {
         return true;
     }
 
-    void RandomUpdate(const Input<N>& initial_board, const int iter,
-                      array<BFS<N>, 2>& bfss, const double progress) {
+    void RandomUpdate(const Input<K, n_class>& initial_board, const int iter,
+                      array<BFS<K, n_class>, 2>& bfss, const double progress) {
         // inplace で処理する
         // ランダムで 1 手消去する
         // 空いていたら、1/2 で手を追加
@@ -702,7 +712,7 @@ template <int N_, int K_> struct State {
                     assert(board[p].color == attraction_target_num);
 
                     const auto r = p.Right();
-                    if (r.x < N && board[r].color == 0 &&
+                    if (r.x < input::N && board[r].color == 0 &&
                         chmin(min_distance, distance_board[r]))
                         best_destination = r;
                     const auto l = p.Left();
@@ -710,7 +720,7 @@ template <int N_, int K_> struct State {
                         chmin(min_distance, distance_board[l]))
                         best_destination = l;
                     const auto d = p.Down();
-                    if (d.y < N && board[d].color == 0 &&
+                    if (d.y < input::N && board[d].color == 0 &&
                         chmin(min_distance, distance_board[d]))
                         best_destination = d;
                     const auto u = p.Up();
@@ -743,14 +753,14 @@ template <int N_, int K_> struct State {
                                 target_center.y +
                                 uniform_int_distribution<>(0, kP.kRadius)(rng) -
                                 uniform_int_distribution<>(0, kP.kRadius)(rng);
-                            if (y < 0 || N <= y)
+                            if (y < 0 || input::N <= y)
                                 continue;
                             const auto x =
                                 target_center.x +
                                 uniform_int_distribution<>(0, kP.kRadius -
                                                                   1)(rng) -
                                 uniform_int_distribution<>(0, kP.kRadius)(rng);
-                            if (x < 0 || N - 1 <= x)
+                            if (x < 0 || input::N - 1 <= x)
                                 continue;
                             const auto l = Point(y, x);
                             const auto r = Point(y, x + 1);
@@ -773,14 +783,14 @@ template <int N_, int K_> struct State {
                                 target_center.x +
                                 uniform_int_distribution<>(0, kP.kRadius)(rng) -
                                 uniform_int_distribution<>(0, kP.kRadius)(rng);
-                            if (x < 0 || N <= x)
+                            if (x < 0 || input::N <= x)
                                 continue;
                             const auto y =
                                 target_center.y +
                                 uniform_int_distribution<>(0, kP.kRadius -
                                                                   1)(rng) -
                                 uniform_int_distribution<>(0, kP.kRadius)(rng);
-                            if (y < 0 || N - 1 <= y)
+                            if (y < 0 || input::N - 1 <= y)
                                 continue;
                             const auto u = Point(y, x);
                             const auto d = Point(y + 1, x);
@@ -853,7 +863,7 @@ template <int N_, int K_> struct State {
                     const auto from = where[order[idx_order++]];
                     // 横
                     for (auto to = Point(from.y, (signed char)(from.x + 1));
-                         to.x < N; to.x++) {
+                         to.x < input::N; to.x++) {
                         if (board[to].color == target &&
                             !uf.same(board[to].index, board[from].index)) {
                             connections[i] = {from, to};
@@ -867,7 +877,7 @@ template <int N_, int K_> struct State {
                     }
                     // 縦
                     for (auto to = Point((signed char)(from.y + 1), from.x);
-                         to.y < N; to.y++) {
+                         to.y < input::N; to.y++) {
                         if (board[to].color == target &&
                             !uf.same(board[to].index, board[from].index)) {
                             connections[i] = {from, to};
@@ -942,13 +952,12 @@ template <int K, int n_class> inline double Temperature(const double t) {
                              kP.kAnnealingB, t);
 }
 
-template <int N, int K> void SolveN() {
-    static constexpr auto n_class = NClass<N, K>();
+template <int K, int n_class> void SolveN() {
 
-    auto input = Input<N>();
+    auto input = Input<K, n_class>();
     input.Read();
-    auto state = State<N, K>();
-    auto bfss = array<BFS<N>, 2>();
+    auto state = State<K, n_class>();
+    auto bfss = array<BFS<K, n_class>, 2>();
 
     auto t0 = Time();
     auto iteration = 0;
@@ -982,7 +991,7 @@ void Solve() {
     switch (input::N) {
         // clang-format off
 
-        #define CASE(n) case n: switch(input::K) { case 2: SolveN<n, 2>(); break; case 3: SolveN<n, 3>(); break; case 4: SolveN<n, 4>(); break; case 5: SolveN<n, 5>(); break; } break;
+        #define CASE(n) case n: switch(input::K) { case 2: SolveN<2, NClass<n, 2>()>(); break; case 3: SolveN<3, NClass<n, 3>()>(); break; case 4: SolveN<4, NClass<n, 4>()>(); break; case 5: SolveN<5, NClass<n, 5>()>(); break; } break;
                                                      CASE(15) CASE(16) CASE(17) CASE(18) CASE(19)
         CASE(20) CASE(21) CASE(22) CASE(23) CASE(24) CASE(25) CASE(26) CASE(27) CASE(28) CASE(29)
         CASE(30) CASE(31) CASE(32) CASE(33) CASE(34) CASE(35) CASE(36) CASE(37) CASE(38) CASE(39)
