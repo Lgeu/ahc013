@@ -69,6 +69,7 @@ using ll = long long;
 constexpr double PI = 3.1415926535897932;
 
 // パラメータ
+/*
 static constexpr auto kErase = 2;             // OPTIMIZE [1, 5]
 static constexpr auto kRadius = 3;            // OPTIMIZE [2, 6]
 static constexpr auto kAnnealingA = 0.0;      // OPTIMIZE [-15.0, 15.0]
@@ -79,6 +80,49 @@ static constexpr auto kTargetDeterminationTrials = 5; // OPTIMIZE LOG [1, 20]
 static constexpr auto kAttractionRatio = 0.1;      // OPTIMIZE LOG [0.01, 0.9]
 static constexpr auto kMaxAttractionDistance = 11; // OPTIMIZE LOG [4, 99]
 static constexpr auto kStartAttraction = 0.01;     // OPTIMIZE LOG [0.001, 0.9]
+*/
+
+struct Parameters {
+    int kErase;
+    int kRadius;
+    double kAnnealingA;
+    double kAnnealingB;
+    double kAnnealingStart;
+    double kSkipRatio;
+    int kTargetDeterminationTrials;
+    double kAttractionRatio;
+    int kMaxAttractionDistance;
+    double kStartAttraction;
+};
+
+// clang-format off
+static constexpr auto kParams = array<array<Parameters, 4>, 6>{array<Parameters, 4>{}, {},
+    {
+        Parameters{2,2,-2.5904459482779183,0.9493971658212628,87.01176413795082,0.6264787167385788,11,0.0659284745059587,41,0.002602230735231084},
+        Parameters{2,4,2.2703340194865698,1.4904195675845822,36.00064809079544,0.7071241780777419,11,0.054113697418634185,6,0.002604536407413457},
+        Parameters{1,3,9.0161704492096,1.9072791247195455,17.95603905531916,0.5606850634921197,17,0.01973603682494546,16,0.004406040570899675},
+        Parameters{3,2,-2.1300239771852327,1.1882521215813304,54.59628288805305,0.780697900228358,6,0.011841665949740107,69,0.45677035999187005},
+    },
+    {
+        Parameters{1,5,1.7510806099614171,1.4059429414366957,30.944494720078026,0.537174183624321,3,0.6145523140762812,11,0.23151954958326257},
+        Parameters{2,4,6.908827907893896,1.7485593184914574,18.789265881349472,0.6457875911917338,7,0.33428190032429533,7,0.5475356382323374},
+        Parameters{2,4,13.738757495188004,0.2509353734608586,24.975382817245457,0.797334033522489,7,0.10322761283002811,8,0.08603254020132625},
+        Parameters{3,6,1.3010570058150372,0.567600312176857,22.29811316452909,0.733682118609247,1,0.5681321627295073,67,0.735819748530746},
+    },
+    {
+        Parameters{1,2,4.636782901725197,1.987876214416901,11.989758496692227,0.6022187443060688,4,0.08972401300744863,16,0.0013947219736300965},
+        Parameters{1,5,1.5602344000571544,2.402531416584829,5.113641231600751,0.3605247770331845,7,0.6409677820668772,47,0.5222825553823018},
+        Parameters{1,4,12.482330290580158,2.160242529407739,4.07978127363604,0.6001948216741284,4,0.2415230553687283,12,0.46398205059035774},
+        Parameters{2,4,2.3274079878720264,1.7233173047574037,6.295171130359719,0.6462667901311743,13,0.5086103443631509,56,0.5433622897632665},
+    },
+    {
+        Parameters{1,2,1.7399839813267215,2.611421200909979,8.77255037968626,0.5524711378149804,7,0.21023068618966576,70,0.07654241305434173},
+        Parameters{1,4,4.191053692304283,2.483976056853254,31.352544114426127,0.7260112488407435,17,0.7516674208635511,14,0.012207064273955482},
+        Parameters{2,5,2.614168246877207,2.478920780805298,4.352658006989104,0.6725557191223528,7,0.6069711057369761,19,0.4864174655756522},
+        Parameters{1,4,12.494506333673725,2.9301795555269603,33.481461287029816,0.6051705550538061,6,0.3610760067114354,12,0.004928332592680671},
+    },
+};
+// clang-format on
 
 template <class T, class S> inline bool chmin(T& m, S q) {
     if (m > q) {
@@ -310,6 +354,17 @@ struct UnionFind {
     inline int same(signed char x, signed char y) { return find(x) == find(y); }
 };
 
+template <int N, int K> static constexpr auto NClass() {
+    if constexpr (K == 2)
+        return N < 21 ? 0 : N < 27 ? 1 : N < 33 ? 2 : 3;
+    if constexpr (K == 3)
+        return N < 24 ? 0 : N < 30 ? 1 : N < 36 ? 2 : 3;
+    if constexpr (K == 4)
+        return N < 27 ? 0 : N < 33 ? 1 : N < 39 ? 2 : 3;
+    if constexpr (K == 5)
+        return N < 30 ? 0 : N < 36 ? 1 : N < 42 ? 2 : 3;
+    return -1;
+}
 template <int N> struct BFS {
     // 最も size が大きい 1, 2 からの距離
     Board<signed char, N, N> result;
@@ -420,6 +475,8 @@ template <int N> struct BFS {
 template <int N_, int K_> struct State {
     static constexpr auto N = N_;
     static constexpr auto K = K_;
+    static constexpr auto n_class = NClass<N, K>();
+    static constexpr auto kP = kParams[K][n_class];
     Board<Cell, N, N> board; // 最終状態
     array<array<Point, 100>, 2> where12;
     double score;
@@ -526,8 +583,8 @@ template <int N_, int K_> struct State {
         // 移動に引力を持たせる
         // iteration は古いもの
         auto attraction_enabled =
-            iteration >= 100 && progress > kStartAttraction &&
-            uniform_real_distribution<>()(rng) < kAttractionRatio;
+            iteration >= 100 && progress > kP.kStartAttraction &&
+            uniform_real_distribution<>()(rng) < kP.kAttractionRatio;
         const auto attraction_target_num =
             attraction_enabled ? uniform_int_distribution<>(1, 2)(rng) : -1;
         auto attracted_index = -1;
@@ -547,7 +604,7 @@ template <int N_, int K_> struct State {
                 assert(bfs.result[where[index]] % 2 != 0 ||
                        bfs.result[where[index]] == 120);
                 if (bfs.result[where[index]] >= 2 &&
-                    bfs.result[where[index]] <= kMaxAttractionDistance) {
+                    bfs.result[where[index]] <= kP.kMaxAttractionDistance) {
                     if (uniform_real_distribution<>(0.0, ++n_candidates)(rng) <
                         1.0) {
                         attracted_index = index;
@@ -567,7 +624,7 @@ template <int N_, int K_> struct State {
         score = 0.0;
 
         assert(n_moves + n_connections <= K * 100);
-        auto steps_erase = array<int, kErase>();
+        auto steps_erase = array<int, kP.kErase>();
         for (auto& s : steps_erase)
             s = n_moves + n_connections == 0
                     ? -1
@@ -584,7 +641,8 @@ template <int N_, int K_> struct State {
         if (!attraction_enabled) {
             const auto target_num = uniform_int_distribution<>(0, 1)(rng);
             auto mi = 101;
-            for (auto trial = 0; trial < kTargetDeterminationTrials; trial++) {
+            for (auto trial = 0; trial < kP.kTargetDeterminationTrials;
+                 trial++) {
                 const auto index = uniform_int_distribution<>(0, 99)(rng);
                 const auto siz = ufs[target_num].size(index);
                 if (chmin(mi, siz)) {
@@ -628,7 +686,7 @@ template <int N_, int K_> struct State {
             if (moves[i].Empty() && connections[i].Empty()) {
                 // 1/2 でスキップ
                 const auto rn = uniform_real_distribution<>()(rng);
-                if (rn < kSkipRatio) {
+                if (rn < kP.kSkipRatio) {
                     empty_indices[n_empty_indices++] = i;
                     continue;
                 }
@@ -683,15 +741,15 @@ template <int N_, int K_> struct State {
                             //     uniform_int_distribution<>(0, N - 2)(rng);
                             const auto y =
                                 target_center.y +
-                                uniform_int_distribution<>(0, kRadius)(rng) -
-                                uniform_int_distribution<>(0, kRadius)(rng);
+                                uniform_int_distribution<>(0, kP.kRadius)(rng) -
+                                uniform_int_distribution<>(0, kP.kRadius)(rng);
                             if (y < 0 || N <= y)
                                 continue;
                             const auto x =
                                 target_center.x +
-                                uniform_int_distribution<>(0,
-                                                           kRadius - 1)(rng) -
-                                uniform_int_distribution<>(0, kRadius)(rng);
+                                uniform_int_distribution<>(0, kP.kRadius -
+                                                                  1)(rng) -
+                                uniform_int_distribution<>(0, kP.kRadius)(rng);
                             if (x < 0 || N - 1 <= x)
                                 continue;
                             const auto l = Point(y, x);
@@ -713,15 +771,15 @@ template <int N_, int K_> struct State {
                             //     uniform_int_distribution<>(0, N - 2)(rng);
                             const auto x =
                                 target_center.x +
-                                uniform_int_distribution<>(0, kRadius)(rng) -
-                                uniform_int_distribution<>(0, kRadius)(rng);
+                                uniform_int_distribution<>(0, kP.kRadius)(rng) -
+                                uniform_int_distribution<>(0, kP.kRadius)(rng);
                             if (x < 0 || N <= x)
                                 continue;
                             const auto y =
                                 target_center.y +
-                                uniform_int_distribution<>(0,
-                                                           kRadius - 1)(rng) -
-                                uniform_int_distribution<>(0, kRadius)(rng);
+                                uniform_int_distribution<>(0, kP.kRadius -
+                                                                  1)(rng) -
+                                uniform_int_distribution<>(0, kP.kRadius)(rng);
                             if (y < 0 || N - 1 <= y)
                                 continue;
                             const auto u = Point(y, x);
@@ -878,12 +936,15 @@ inline double MonotonicFunction(const double start, const double end,
     return MonotonicallyIncreasingFunction(a, b, x) * (end - start) + start;
 }
 
-inline double Temperature(const double t) {
-    // return MonotonicFunction(20.0, 2.0, -3.0, 2.0, t);
-    return MonotonicFunction(kAnnealingStart, 0.5, kAnnealingA, kAnnealingB, t);
+template <int K, int n_class> inline double Temperature(const double t) {
+    static constexpr auto kP = kParams[K][n_class];
+    return MonotonicFunction(kP.kAnnealingStart, 0.5, kP.kAnnealingA,
+                             kP.kAnnealingB, t);
 }
 
 template <int N, int K> void SolveN() {
+    static constexpr auto n_class = NClass<N, K>();
+
     auto input = Input<N>();
     input.Read();
     auto state = State<N, K>();
@@ -901,7 +962,7 @@ template <int N, int K> void SolveN() {
         auto updated_state = state;
         updated_state.RandomUpdate(input, iteration, bfss, progress_rate);
         const auto gain = updated_state.score - state.score;
-        const auto temperature = Temperature(progress_rate);
+        const auto temperature = Temperature<K, n_class>(progress_rate);
         const auto acceptance_proba = exp(gain / temperature);
         if (uniform_real_distribution<>()(rng) < acceptance_proba) {
             state = updated_state;
