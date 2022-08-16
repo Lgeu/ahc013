@@ -4,3 +4,4 @@
 *.html
 perf.data*
 .ipynb_checkpoints
+/tuning/work_*
