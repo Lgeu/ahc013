@@ -5,3 +5,4 @@
 perf.data*
 .ipynb_checkpoints
 /tuning/work_*
+/mnt
